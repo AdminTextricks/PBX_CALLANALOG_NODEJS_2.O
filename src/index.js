@@ -46,7 +46,7 @@ io.on('connection', (socket) => {
                 const balance = results.length > 0 ? results[0].balance : 0;
                 socket.emit('balance', balance);
             });
-        }, 5000); // Check every 5 seconds
+        }, 5000);
 
         socket.balanceCheckInterval = balanceCheckInterval;
     });

@@ -1,11 +1,19 @@
 const mysql = require("mysql2");
 
 const db = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "tumko34h1se",
-  database: "myphonesystem",
+  host: "92.204.162.221",
+  port: "19645",
+  user: "StgcalanLg",
+  password: "9RWlG_ZBd`h",
+  database: "pbx_callanalog",
 });
+
+// const db = mysql.createConnection({
+//   host: "localhost",
+//   user: "root",
+//   password: "",
+//   database: "pbx_callanalog",
+// });
 
 db.connect((err) => {
   if (err) {

@@ -151,5 +151,5 @@ io.on("connection", (socket) => {
 // Start the server
 server.listen(PORT, () => {
   const protocol = NODE_ENV === 'production' ? 'https' : 'http';
-  console.log(`Server is running at ${protocol}://pbxbackend.callanalog.com:${PORT}`);
+  console.log(`Server is running at  ${protocol}://pbxbackend.callanalog.com:${PORT}`);
 });

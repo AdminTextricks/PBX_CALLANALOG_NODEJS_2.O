@@ -1,3 +1,5 @@
+const https = require('https');
+const fs = require('fs');
 const express = require("express");
 const app = express();
 const cors = require("cors");
@@ -5,6 +7,11 @@ const connection = require("./db");
 const bodyParser = require("body-parser");
 const session = require("express-session");
 const sharedsession = require("express-socket.io-session");
+
+const options = {
+  key: fs.readFileSync('/etc/letsencrypt/live/pbxbackend.callanalog.com/cert.pem'),
+  cert: fs.readFileSync('/etc/letsencrypt/live/pbxbackend.callanalog.com/privkey.pem')
+};
 
 app.use(bodyParser.json());
 
@@ -30,6 +37,10 @@ app.use(express.json());
 const PORT = 8001;
 
 const server = app.listen(PORT, console.log("Server is Running...", PORT));
+
+https.createServer(options, app).listen(port, () => {
+  console.log(`Server is running at https://pbxbackend.callanalog.com:${port}`);
+});
 
 app.get("/", (_, res) => {
   res.send("Server runing...");

@@ -1,56 +1,66 @@
-require('dotenv').config();
-const https = require('https');
-const http = require('http');
-const fs = require('fs');
+const https = require("https");
+const fs = require("fs");
 const express = require("express");
+const app = express();
 const cors = require("cors");
+const connection = require("./db");
 const bodyParser = require("body-parser");
 const session = require("express-session");
 const sharedsession = require("express-socket.io-session");
-const connection = require("./db");
-const app = express();
 
-const PORT = process.env.PORT || 8001;
-const NODE_ENV = process.env.NODE_ENV || 'development';
+const PORT = 8001;
 
-// Middleware
+const options = {
+  key: fs.readFileSync(
+    "/etc/letsencrypt/live/pbxbackend.callanalog.com/privkey.pem"
+  ),
+  cert: fs.readFileSync(
+    "/etc/letsencrypt/live/pbxbackend.callanalog.com/cert.pem"
+  ),
+};
+
+https.createServer(options, app).listen(PORT, () => {
+  console.log(`Server is running at https://pbxbackend.callanalog.com:${PORT}`);
+});
+
 app.use(bodyParser.json());
-app.use(cors({ origin: "*" }));
+
+app.use(
+  cors({
+    origin: "*",
+  })
+);
 
 const sessionMiddleware = session({
   secret: "12345",
   resave: true,
   saveUninitialized: true,
-  cookie: { maxAge: 8 * 60 * 60 * 1000 } // 8 hours in milliseconds
+  cookie: {
+    maxAge: 8 * 60 * 60 * 1000, // 8 hours in milliseconds
+  },
 });
 
 app.use(sessionMiddleware);
+
 app.use(express.json());
 
-// Routes
+const server = app.listen(PORT, console.log("Server is Running...", PORT));
+
 app.get("/", (_, res) => {
-  res.send("Server running...");
+  res.send("Server runing...");
 });
 
-let server;
-if (NODE_ENV === 'production') {
-  const options = {
-    key: fs.readFileSync(process.env.SSL_KEY_PATH),
-    cert: fs.readFileSync(process.env.SSL_CERT_PATH)
-  };
-  server = https.createServer(options, app);
-} else {
-  server = http.createServer(app);
-}
+////////////////////Socket Module/////////////////////////////
 
-// Socket.IO setup
-const io = require("socket.io")(server, {
-  cors: { origin: "*" }
+const io = require("socket.io")(https, {
+  cors: {
+    origin: "*",
+  },
 });
 
 io.use(sharedsession(sessionMiddleware));
 
-io.on("connection", (socket) => {
+io.on("connection", function (socket) {
   if (socket.handshake.session.userdata) {
     const userdata = socket.handshake.session.userdata;
     console.log("User connected", userdata);
@@ -77,7 +87,8 @@ io.on("connection", (socket) => {
         if (err) {
           return reject(err);
         }
-        const statusMessage = results.length > 0 ? results[0].status_message : "No record found";
+        const statusMessage =
+          results.length > 0 ? results[0].status_message : "No record found";
         resolve(statusMessage);
       });
     });
@@ -88,7 +99,10 @@ io.on("connection", (socket) => {
       const result = await getVerifyDoc(userdata);
       const currentStatus = result;
       if (currentStatus !== previousStatus) {
-        socket.emit("isVerifiedDoc", { userId: userdata.id, statusMessage: result });
+        socket.emit("isVerifiedDoc", {
+          userId: userdata.id,
+          statusMessage: result,
+        });
       }
       if (currentStatus != 1) {
         setTimeout(() => pollStatus(userdata, currentStatus), 2000);
@@ -109,7 +123,9 @@ io.on("connection", (socket) => {
         }
         const currentCount = results[0]?.count;
         if (prevData !== null && currentCount !== prevData) {
-          socket.emit("changeDocCount", { count: currentCount });
+          socket.emit("changeDocCount", {
+            count: currentCount,
+          });
         }
         prevData = currentCount;
         resolve(currentCount);
@@ -125,31 +141,34 @@ io.on("connection", (socket) => {
   socket.on("login", async (userdata) => {
     socket.handshake.session.userdata = userdata;
     socket.handshake.session.save(async (err) => {
-      if (!err && userdata.is_verified_doc !== 1) {
-        pollStatus(userdata, null);
+      if (err) {
+      } else {
+        if (userdata.is_verified_doc !== 1) {
+          pollStatus(userdata, null);
+        }
       }
     });
   });
 
   socket.on("changeDocCount", async () => {
     const role_id = socket.handshake.session.userdata.role_id;
-    if (["1", "2", "3"].includes(role_id)) {
+    if (role_id === "1" || role_id === "2" || role_id === "3") {
       setInterval(async () => {
         await getDocumentsCount();
       }, 5000);
     }
   });
 
-  socket.on("logout", function () {
+  socket.on("logout", function (userdata) {
     if (socket.handshake.session.userdata) {
       delete socket.handshake.session.userdata;
-      socket.handshake.session.save();
+      socket.handshake.session.save((err) => {
+        if (err) {
+        } else {
+        }
+      });
     }
   });
 });
 
-// Start the server
-server.listen(PORT, () => {
-  const protocol = NODE_ENV === 'production' ? 'https' : 'http';
-  console.log(`Server is running at ${protocol}://pbxbackend.callanalog.com:${PORT}`);
-});
+module.exports = app;

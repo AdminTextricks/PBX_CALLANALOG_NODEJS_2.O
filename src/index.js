@@ -1,7 +1,4 @@
-require('dotenv').config();
-const https = require('https');
-const http = require('http');
-const fs = require('fs');
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
@@ -10,8 +7,7 @@ const sharedsession = require("express-socket.io-session");
 const connection = require("./db");
 const app = express();
 
-const PORT = process.env.PORT || 8001;
-const NODE_ENV = process.env.NODE_ENV || 'development';
+const PORT = 8001;
 
 // Middleware
 app.use(bodyParser.json());
@@ -21,7 +17,7 @@ const sessionMiddleware = session({
   secret: "12345",
   resave: true,
   saveUninitialized: true,
-  cookie: { maxAge: 8 * 60 * 60 * 1000 } // 8 hours in milliseconds
+  cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8 hours in milliseconds
 });
 
 app.use(sessionMiddleware);
@@ -32,31 +28,17 @@ app.get("/", (_, res) => {
   res.send("Server running...");
 });
 
-let server;
-if (NODE_ENV === 'production') {
-  const options = {
-    key: fs.readFileSync(process.env.SSL_KEY_PATH),
-    cert: fs.readFileSync(process.env.SSL_CERT_PATH)
-  };
-  server = https.createServer(options, app);
-} else {
-  server = http.createServer(app);
-}
+const server = app.listen(PORT, console.log("Server is Running...", PORT));
 
 // Socket.IO setup
 const io = require("socket.io")(server, {
-  cors: { origin: "*" }
+  cors: { origin: "*" },
 });
 
 io.use(sharedsession(sessionMiddleware));
 
 io.on("connection", (socket) => {
-  if (socket.handshake.session.userdata) {
-    const userdata = socket.handshake.session.userdata;
-    console.log("User connected", userdata);
-  } else {
-    console.log("No userdata found in session.");
-  }
+  let prevData = null;
 
   const getVerifyDoc = ({ id }) => {
     return new Promise((resolve, reject) => {
@@ -77,7 +59,8 @@ io.on("connection", (socket) => {
         if (err) {
           return reject(err);
         }
-        const statusMessage = results.length > 0 ? results[0].status_message : "No record found";
+        const statusMessage =
+          results.length > 0 ? results[0].status_message : "No record found";
         resolve(statusMessage);
       });
     });
@@ -88,7 +71,10 @@ io.on("connection", (socket) => {
       const result = await getVerifyDoc(userdata);
       const currentStatus = result;
       if (currentStatus !== previousStatus) {
-        socket.emit("isVerifiedDoc", { userId: userdata.id, statusMessage: result });
+        socket.emit("isVerifiedDoc", {
+          userId: userdata.id,
+          statusMessage: result,
+        });
       }
       if (currentStatus != 1) {
         setTimeout(() => pollStatus(userdata, currentStatus), 2000);
@@ -97,8 +83,6 @@ io.on("connection", (socket) => {
       setTimeout(() => pollStatus(userdata, previousStatus), 2000);
     }
   };
-
-  let prevData = null;
 
   const getDocumentsCount = () => {
     return new Promise((resolve, reject) => {
@@ -113,6 +97,20 @@ io.on("connection", (socket) => {
         }
         prevData = currentCount;
         resolve(currentCount);
+      });
+    });
+  };
+
+  const getBalanceByCompany = (id) => {
+    return new Promise((resolve, reject) => {
+      const query = `SELECT id,company_name,email, balance FROM companies where id = ${id}`;
+      connection.query(query, (err, results) => {
+        if (err) {
+          return reject(err);
+        }
+        const currentBalalnce = results[0]?.balance;
+        socket.emit("fetchBalance", currentBalalnce);
+        resolve(currentBalalnce);
       });
     });
   };
@@ -140,16 +138,15 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("fetchBalanceReq", async (id) => {
+      await getBalanceByCompany(id);
+  });
+
   socket.on("logout", function () {
     if (socket.handshake.session.userdata) {
       delete socket.handshake.session.userdata;
       socket.handshake.session.save();
     }
   });
-});
-
-// Start the server
-server.listen(PORT, () => {
-  const protocol = NODE_ENV === 'production' ? 'https' : 'http';
-  console.log(`Server is running at  ${protocol}://pbxbackend.callanalog.com:${PORT}`);
+  
 });

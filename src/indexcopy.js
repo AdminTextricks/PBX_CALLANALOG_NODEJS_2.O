@@ -1,73 +1,56 @@
+require("dotenv").config();
 const https = require("https");
+const http = require("http");
 const fs = require("fs");
 const express = require("express");
-const app = express();
 const cors = require("cors");
-const connection = require("./db");
 const bodyParser = require("body-parser");
 const session = require("express-session");
 const sharedsession = require("express-socket.io-session");
+const connection = require("./db");
+const app = express();
 
-const PORT = 8001;
+const PORT = process.env.PORT || 8001;
+const NODE_ENV = process.env.NODE_ENV || "development";
 
-const options = {
-  key: fs.readFileSync(
-    "/etc/letsencrypt/live/pbxbackend.callanalog.com/privkey.pem"
-  ),
-  cert: fs.readFileSync(
-    "/etc/letsencrypt/live/pbxbackend.callanalog.com/cert.pem"
-  ),
-};
-
-https.createServer(options, app).listen(PORT, () => {
-  console.log(`Server is running at https://pbxbackend.callanalog.com:${PORT}`);
-});
-
+// Middleware
 app.use(bodyParser.json());
-
-app.use(
-  cors({
-    origin: "*",
-  })
-);
+app.use(cors({ origin: "*" }));
 
 const sessionMiddleware = session({
   secret: "12345",
   resave: true,
   saveUninitialized: true,
-  cookie: {
-    maxAge: 8 * 60 * 60 * 1000, // 8 hours in milliseconds
-  },
+  cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8 hours in milliseconds
 });
 
 app.use(sessionMiddleware);
-
 app.use(express.json());
 
-const server = app.listen(PORT, console.log("Server is Running...", PORT));
-
+// Routes
 app.get("/", (_, res) => {
-  res.send("Server runing...");
+  res.send("Server running...");
 });
 
-////////////////////Socket Module/////////////////////////////
+let server;
+if (NODE_ENV === "production") {
+  const options = {
+    key: fs.readFileSync(process.env.SSL_KEY_PATH),
+    cert: fs.readFileSync(process.env.SSL_CERT_PATH),
+  };
+  server = https.createServer(options, app);
+} else {
+  server = http.createServer(app);
+}
 
-const io = require("socket.io")(https, {
-  cors: {
-    origin: "*",
-  },
+// Socket.IO setup
+const io = require("socket.io")(server, {
+  cors: { origin: "*" },
 });
 
 io.use(sharedsession(sessionMiddleware));
 
-io.on("connection", function (socket) {
-  if (socket.handshake.session.userdata) {
-    const userdata = socket.handshake.session.userdata;
-    console.log("User connected", userdata);
-  } else {
-    console.log("No userdata found in session.");
-  }
-
+io.on("connection", (socket) => {
   const getVerifyDoc = ({ id }) => {
     return new Promise((resolve, reject) => {
       const query = `
@@ -123,11 +106,23 @@ io.on("connection", function (socket) {
         }
         const currentCount = results[0]?.count;
         if (prevData !== null && currentCount !== prevData) {
-          socket.emit("changeDocCount", {
-            count: currentCount,
-          });
+          socket.emit("changeDocCount", { count: currentCount });
         }
         prevData = currentCount;
+        resolve(currentCount);
+      });
+    });
+  };
+
+  const getBalanceByCompany = (id) => {
+    return new Promise((resolve, reject) => {
+      const query = `SELECT id,company_name,email, balance FROM companies where id = ${id}`;
+      connection.query(query, (err, results) => {
+        if (err) {
+          return reject(err);
+        }
+        const currentCount = results[0]?.balance;
+        socket.emit("fetchBalance", { balance: currentCount });
         resolve(currentCount);
       });
     });
@@ -141,34 +136,39 @@ io.on("connection", function (socket) {
   socket.on("login", async (userdata) => {
     socket.handshake.session.userdata = userdata;
     socket.handshake.session.save(async (err) => {
-      if (err) {
-      } else {
-        if (userdata.is_verified_doc !== 1) {
-          pollStatus(userdata, null);
-        }
+      if (!err && userdata.is_verified_doc !== 1) {
+        pollStatus(userdata, null);
       }
     });
   });
 
   socket.on("changeDocCount", async () => {
     const role_id = socket.handshake.session.userdata.role_id;
-    if (role_id === "1" || role_id === "2" || role_id === "3") {
+    if (["1", "2", "3"].includes(role_id)) {
       setInterval(async () => {
         await getDocumentsCount();
       }, 5000);
     }
   });
 
-  socket.on("logout", function (userdata) {
+  socket.on("fetchBalanceReq", async (id) => {
+    setInterval(async () => {
+      await getBalanceByCompany(id);
+    }, 2000);
+  });
+
+  socket.on("logout", function () {
     if (socket.handshake.session.userdata) {
       delete socket.handshake.session.userdata;
-      socket.handshake.session.save((err) => {
-        if (err) {
-        } else {
-        }
-      });
+      socket.handshake.session.save();
     }
   });
 });
 
-module.exports = app;
+// Start the server
+server.listen(PORT, () => {
+  const protocol = NODE_ENV === "production" ? "https" : "http";
+  console.log(
+    `Server is running at  ${protocol}://pbxbackend.callanalog.com:${PORT}`
+  );
+});

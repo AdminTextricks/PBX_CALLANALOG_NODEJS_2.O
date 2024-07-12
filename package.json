@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "nodemon ./src/index.js",
-    "build": "rd /s /q dist 2>nul && mkdir dist && babel src -s -d dist",
+    "build": "rd /s /q dist && babel src -s -d dist",
     "dev": "nodemon ./dist/index.js"
   },
   "author": "",

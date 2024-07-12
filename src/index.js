@@ -28,9 +28,7 @@ app.get("/", (_, res) => {
   res.send("Server running...");
 });
 
-const server = app.listen(PORT, () => {
-  console.log("Server is Running on port", PORT);
-});
+const server = app.listen(PORT, console.log("Server is Running...", PORT));
 
 // Socket.IO setup
 const io = require("socket.io")(server, {
@@ -45,17 +43,17 @@ io.on("connection", (socket) => {
   const getVerifyDoc = ({ id }) => {
     return new Promise((resolve, reject) => {
       const query = `
-        SELECT 
-          CASE 
-            WHEN is_verified_doc = 0 THEN 0
-            WHEN is_verified_doc = 1 THEN 1
-            WHEN is_verified_doc = 2 THEN 2
-            WHEN is_verified_doc = 3 THEN 3
-            ELSE 'Unknown status'
-          END AS status_message
-        FROM users
-        WHERE id = ${id};
-      `;
+          SELECT 
+            CASE 
+              WHEN is_verified_doc = 0 THEN 0
+              WHEN is_verified_doc = 1 THEN 1
+              WHEN is_verified_doc = 2 THEN 2
+              WHEN is_verified_doc = 3 THEN 3
+              ELSE 'Unknown status'
+            END AS status_message
+          FROM users
+          WHERE id = ${id};
+        `;
 
       connection.query(query, (err, results) => {
         if (err) {
@@ -82,7 +80,6 @@ io.on("connection", (socket) => {
         setTimeout(() => pollStatus(userdata, currentStatus), 2000);
       }
     } catch (error) {
-      console.error("Error in pollStatus:", error);
       setTimeout(() => pollStatus(userdata, previousStatus), 2000);
     }
   };
@@ -106,14 +103,14 @@ io.on("connection", (socket) => {
 
   const getBalanceByCompany = (id) => {
     return new Promise((resolve, reject) => {
-      const query = `SELECT id,company_name,email, balance FROM companies WHERE id = ${id}`;
+      const query = `SELECT id,company_name,email, balance FROM companies where id = ${id}`;
       connection.query(query, (err, results) => {
         if (err) {
           return reject(err);
         }
-        const currentBalance = results[0]?.balance;
-        socket.emit("fetchBalance", currentBalance);
-        resolve(currentBalance);
+        const currentBalalnce = results[0]?.balance;
+        socket.emit("fetchBalance", currentBalalnce);
+        resolve(currentBalalnce);
       });
     });
   };
@@ -126,11 +123,7 @@ io.on("connection", (socket) => {
   socket.on("login", async (userdata) => {
     socket.handshake.session.userdata = userdata;
     socket.handshake.session.save(async (err) => {
-      if (err) {
-        console.error("Error saving session:", err);
-        return;
-      }
-      if (userdata.is_verified_doc !== 1) {
+      if (!err && userdata.is_verified_doc !== 1) {
         pollStatus(userdata, null);
       }
     });
@@ -140,23 +133,20 @@ io.on("connection", (socket) => {
     const role_id = socket.handshake.session.userdata.role_id;
     if (["1", "2", "3"].includes(role_id)) {
       setInterval(async () => {
-        await getDocumentsCount().catch(console.error);
+        await getDocumentsCount();
       }, 5000);
     }
   });
 
   socket.on("fetchBalanceReq", async (id) => {
-    await getBalanceByCompany(id).catch(console.error);
+      await getBalanceByCompany(id);
   });
 
   socket.on("logout", function () {
     if (socket.handshake.session.userdata) {
       delete socket.handshake.session.userdata;
-      socket.handshake.session.save((err) => {
-        if (err) {
-          console.error("Error saving session:", err);
-        }
-      });
+      socket.handshake.session.save();
     }
   });
+  
 });

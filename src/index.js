@@ -30,7 +30,6 @@ app.get("/", (_, res) => {
 
 const server = app.listen(PORT, console.log("Server is Running...", PORT));
 
-// Socket.IO setup
 const io = require("socket.io")(server, {
   cors: { origin: "*" },
 });

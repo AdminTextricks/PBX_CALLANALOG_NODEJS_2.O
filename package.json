@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "nodemon ./src/index.js",
-    "build": "rd /s /q dist 2>nul && mkdir dist && babel src -s -d dist",
+    "build": "rimraf dist && mkdir dist && babel src -s -d dist",
     "dev": "nodemon ./dist/index.js"
   },
   "author": "",
@@ -25,6 +25,7 @@
     "@babel/cli": "^7.23.9",
     "@babel/core": "^7.24.0",
     "@babel/preset-env": "^7.24.0",
-    "nodemon": "^3.1.2"
+    "nodemon": "^3.1.2",
+    "rimraf": "^6.0.1"
   }
 }

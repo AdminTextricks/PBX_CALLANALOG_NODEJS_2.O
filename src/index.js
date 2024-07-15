@@ -6,6 +6,7 @@ const session = require("express-session");
 const sharedsession = require("express-socket.io-session");
 const connection = require("./db");
 const app = express();
+const MySQLStore = require('express-mysql-session')(session);
 
 const PORT = 8001;
 
@@ -13,14 +14,18 @@ const PORT = 8001;
 app.use(bodyParser.json());
 app.use(cors({ origin: "*" }));
 
+const sessionStore = new MySQLStore(connection);
+
 const sessionMiddleware = session({
   secret: "12345",
-  resave: true,
-  saveUninitialized: true,
+  resave: false, // Set to false to avoid unnecessary session resaving
+  saveUninitialized: false, // Set to false to avoid saving uninitialized sessions
+  store: sessionStore,
   cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8 hours in milliseconds
 });
 
 app.use(sessionMiddleware);
+
 app.use(express.json());
 
 // Routes
@@ -35,6 +40,27 @@ const io = require("socket.io")(server, {
 });
 
 io.use(sharedsession(sessionMiddleware));
+
+const getLiveCalls = ({ search = "", page = 1, pageSize = 10 }) => {
+  return new Promise((resolve, reject) => {
+    const offset = (page - 1) * pageSize;
+    const query = `
+      SELECT * FROM live_calls
+      WHERE (account_code LIKE ? OR tfn LIKE ?)
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?;
+    `;
+
+    const values = [`%${search}%`, `%${search}%`, pageSize, offset];
+
+    connection.query(query, values, (err, results) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(results);
+    });
+  });
+};
 
 io.on("connection", (socket) => {
   let prevData = null;
@@ -138,7 +164,17 @@ io.on("connection", (socket) => {
   });
 
   socket.on("fetchBalanceReq", async (id) => {
-      await getBalanceByCompany(id);
+    await getBalanceByCompany(id);
+  });
+
+  socket.on("fetchLiveCallsReq", async ({ search, page, pageSize }) => {
+    try {
+      const liveCalls = await getLiveCalls({ search, page, pageSize });
+      socket.emit("getLiveCallsRes", liveCalls);
+    } catch (error) {
+      console.error("Error fetching live calls:", error);
+      socket.emit("getLiveCallsRes", { error: "Internal server error" });
+    }
   });
 
   socket.on("logout", function () {
@@ -147,5 +183,4 @@ io.on("connection", (socket) => {
       socket.handshake.session.save();
     }
   });
-  
 });

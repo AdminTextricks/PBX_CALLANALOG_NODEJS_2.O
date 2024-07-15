@@ -1,19 +1,37 @@
 const mysql = require("mysql2");
+const dotenv = require("dotenv");
 
-// const db = mysql.createConnection({
-//   host: "92.204.162.221",
-//   port: "19645",
-//   user: "StgcalanLg",
-//   password: "9RWlG_ZBd`h",
-//   database: "pbx_callanalog",
-// });
+dotenv.config();
 
-const db = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "pbx_callanalog",
-});
+const env = process.env.NODE_ENV || "development";
+
+const config = {
+  development: {
+    host: process.env.DEV_DB_HOST,
+    port: process.env.DEV_DB_PORT,
+    user: process.env.DEV_DB_USER,
+    password: process.env.DEV_DB_PASSWORD,
+    database: process.env.DEV_DB_NAME,
+  },
+  production: {
+    host: process.env.PROD_DB_HOST,
+    port: process.env.PROD_DB_PORT,
+    user: process.env.PROD_DB_USER,
+    password: process.env.PROD_DB_PASSWORD,
+    database: process.env.PROD_DB_NAME,
+  },
+  local: {
+    host: process.env.LOCAL_DB_HOST,
+    user: process.env.LOCAL_DB_USER,
+    password: process.env.LOCAL_DB_PASSWORD,
+    database: process.env.LOCAL_DB_NAME,
+  },
+};
+
+// Select the configuration based on the current environment
+const dbConfig = config[env];
+
+const db = mysql.createConnection(dbConfig);
 
 db.connect((err) => {
   if (err) {

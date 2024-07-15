@@ -6,7 +6,7 @@ const session = require("express-session");
 const sharedsession = require("express-socket.io-session");
 const connection = require("./db");
 const app = express();
-const MySQLStore = require('express-mysql-session')(session);
+const MySQLStore = require("express-mysql-session")(session);
 
 const PORT = 8001;
 
@@ -41,19 +41,66 @@ const io = require("socket.io")(server, {
 
 io.use(sharedsession(sessionMiddleware));
 
-const getLiveCalls = ({ search = "", page = 1, pageSize = 10 }) => {
+const getLiveCalls = ({ company_id }) => {
   return new Promise((resolve, reject) => {
-    const offset = (page - 1) * pageSize;
     const query = `
-      SELECT * FROM live_calls
-      WHERE (account_code LIKE ? OR tfn LIKE ?)
-      ORDER BY created_at DESC
-      LIMIT ? OFFSET ?;
+      SELECT companies.company_name, companies.email, countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
+      left join companies on live_calls.company_id = companies.id
+      left join countries on live_calls.country_id = countries.id
+      where live_calls.call_status=3 and live_calls.company_id= ${company_id}
     `;
+    connection.query(query, (err, results) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(results);
+    });
+  });
+};
 
-    const values = [`%${search}%`, `%${search}%`, pageSize, offset];
+const getWaitingCalls = ({ company_id }) => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT companies.company_name, companies.email, countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
+      left join companies on live_calls.company_id = companies.id
+      left join countries on live_calls.country_id = countries.id
+      where live_calls.call_status=2 and live_calls.company_id= ${company_id}
+    `;
+    connection.query(query, (err, results) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(results);
+    });
+  });
+};
 
-    connection.query(query, values, (err, results) => {
+const getAllWaitingCalls = () => {
+  return new Promise((resolve, reject) => {
+    const query = `
+     SELECT companies.company_name, companies.email, countries.country_name, startcall, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
+     left join companies on live_calls.company_id = companies.id
+     left join countries on live_calls.country_id = countries.id
+     where live_calls.call_status=2
+    `;
+    connection.query(query, (err, results) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(results);
+    });
+  });
+};
+
+const getAllLiveCalls = () => {
+  return new Promise((resolve, reject) => {
+    const query = `
+     SELECT companies.company_name, companies.email, countries.country_name, ip, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
+     left join companies on live_calls.company_id = companies.id
+     left join countries on live_calls.country_id = countries.id
+     where live_calls.call_status=3
+    `;
+    connection.query(query, (err, results) => {
       if (err) {
         return reject(err);
       }
@@ -167,14 +214,94 @@ io.on("connection", (socket) => {
     await getBalanceByCompany(id);
   });
 
-  socket.on("fetchLiveCallsReq", async ({ search, page, pageSize }) => {
+  let company_id;
+
+  socket.on("fetchLiveCallsReq", async (data) => {
     try {
-      const liveCalls = await getLiveCalls({ search, page, pageSize });
+      company_id = data.company_id;
+      const liveCalls = await getLiveCalls(data);
       socket.emit("getLiveCallsRes", liveCalls);
     } catch (error) {
-      console.error("Error fetching live calls:", error);
       socket.emit("getLiveCallsRes", { error: "Internal server error" });
     }
+  });
+
+  const fetchLiveCallsInterval = setInterval(async () => {
+    if (company_id) {
+      const data = { company_id: company_id };
+      const liveCalls = await getLiveCalls(data);
+      socket.emit("getLiveCallsRes", liveCalls);
+    }
+  }, 5000);
+
+  socket.on("disconnect", () => {
+    clearInterval(fetchLiveCallsInterval);
+  });
+
+  socket.on("fetchWaitingCallsReq", async (data) => {
+    try {
+      company_id = data.company_id;
+      const waitingCalls = await getWaitingCalls(data);
+      socket.emit("getWaitingCallsRes", waitingCalls);
+    } catch (error) {
+      socket.emit("getWaitingCallsRes", { error: "Internal server error" });
+    }
+  });
+
+  const fetchWaitingCallsInterval = setInterval(async () => {
+    if (company_id) {
+      const data = { company_id: company_id };
+      const waitingCalls = await getWaitingCalls(data);
+      socket.emit("getWaitingCallsRes", waitingCalls);
+    }
+  }, 155000);
+
+  socket.on("disconnect", () => {
+    clearInterval(fetchWaitingCallsInterval);
+  });
+
+  let slug;
+
+  socket.on("fetchAllWaitingCallsReq", async (data) => {
+    try {
+      slug = data.slug;
+      const waitingCalls = await getAllWaitingCalls();
+      socket.emit("getAllWaitingCallsRes", waitingCalls);
+    } catch (error) {
+      socket.emit("getAllWaitingCallsRes", { error: "Internal server error" });
+    }
+  });
+
+  const fetchAllWaitingCallsInterval = setInterval(async () => {
+    if (["super-admin", "noc", "support", "reseller"].includes(slug)) {
+      const waitingCalls = await getAllWaitingCalls();
+      socket.emit("getAllWaitingCallsRes", waitingCalls);
+    }
+  }, 2000);
+
+  socket.on("disconnect", () => {
+    clearInterval(fetchAllWaitingCallsInterval);
+  });
+
+  socket.on("fetchAllLiveCallsReq", async (data) => {
+    try {
+      slug = data.slug;
+      const allLiveCalls = await getAllLiveCalls();
+      socket.emit("getAllAllCallsRes", allLiveCalls);
+    } catch (error) {
+      socket.emit("getAllAllCallsRes", { error: "Internal server error" });
+    }
+  });
+
+  const fetchAllLiveCallsInterval = setInterval(async () => {
+    if (["super-admin", "noc", "support", "reseller"].includes(slug)) {
+      const fetchAllLiveCallsInterval = await getAllLiveCalls();
+      socket.emit("getAllAllCallsRes", fetchAllLiveCallsInterval);
+    }
+  }, 2000);
+
+  socket.on("disconnect", () => {
+    clearInterval(fetchAllLiveCallsInterval);
   });
 
   socket.on("logout", function () {

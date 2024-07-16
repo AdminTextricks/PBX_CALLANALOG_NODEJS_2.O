@@ -7,34 +7,26 @@ const sharedsession = require("express-socket.io-session");
 const connection = require("./db");
 const app = express();
 const MySQLStore = require("express-mysql-session")(session);
-
 const PORT = 8001;
-
 // Middleware
 app.use(bodyParser.json());
-app.use(cors({ origin: "*" }));
-
+app.use(cors({
+  origin: 'https://pbx.callanalog.com'
+}));
 const sessionStore = new MySQLStore(connection);
-
 const sessionMiddleware = session({
-  secret: "12345",
-  resave: false, // Set to false to avoid unnecessary session resaving
-  saveUninitialized: false, // Set to false to avoid saving uninitialized sessions
+  secret: process.env.SESSION_SECRET_KEY,
+  resave: false,
+  saveUninitialized: false,
   store: sessionStore,
-  cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8 hours in milliseconds
+  cookie: { maxAge: 8 * 60 * 60 * 1000 },
 });
-
 app.use(sessionMiddleware);
-
 app.use(express.json());
-
-// Routes
 app.get("/", (_, res) => {
   res.send("Server running...");
 });
-
 const server = app.listen(PORT, console.log("Server is Running...", PORT));
-
 const io = require("socket.io")(server, {
   cors: { origin: "*" },
 });

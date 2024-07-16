@@ -50,7 +50,7 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
-const env = process.env.NODE_ENV || "development";
+const env = process.env.NODE_ENV || "production";
 
 const config = {
   development: {
@@ -67,6 +67,7 @@ const config = {
     user: process.env.PROD_DB_USER,
     password: process.env.PROD_DB_PASSWORD,
     database: process.env.PROD_DB_NAME,
+    timezone: 'Z'
   },
   local: {
     host: process.env.LOCAL_DB_HOST,

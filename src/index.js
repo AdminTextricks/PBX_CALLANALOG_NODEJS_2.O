@@ -10,19 +10,21 @@ const MySQLStore = require("express-mysql-session")(session);
 const PORT = 8001;
 // Middleware
 app.use(bodyParser.json());
+//app.use(cors({ origin: "*" }));
 app.use(cors({
   origin: 'https://pbx.callanalog.com'
 }));
 const sessionStore = new MySQLStore(connection);
 const sessionMiddleware = session({
-  secret: process.env.SESSION_SECRET_KEY,
-  resave: false,
-  saveUninitialized: false,
+  secret: "12345",
+  resave: false, // Set to false to avoid unnecessary session resaving
+  saveUninitialized: false, // Set to false to avoid saving uninitialized sessions
   store: sessionStore,
-  cookie: { maxAge: 8 * 60 * 60 * 1000 },
+  cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8 hours in milliseconds
 });
 app.use(sessionMiddleware);
 app.use(express.json());
+// Routes
 app.get("/", (_, res) => {
   res.send("Server running...");
 });
@@ -30,9 +32,7 @@ const server = app.listen(PORT, console.log("Server is Running...", PORT));
 const io = require("socket.io")(server, {
   cors: { origin: "*" },
 });
-
 io.use(sharedsession(sessionMiddleware));
-
 const getLiveCalls = ({ company_id }) => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -49,7 +49,6 @@ const getLiveCalls = ({ company_id }) => {
     });
   });
 };
-
 const getWaitingCalls = ({ company_id }) => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -66,7 +65,6 @@ const getWaitingCalls = ({ company_id }) => {
     });
   });
 };
-
 const getAllWaitingCalls = () => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -83,7 +81,6 @@ const getAllWaitingCalls = () => {
     });
   });
 };
-
 const getAllLiveCalls = () => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -100,15 +97,13 @@ const getAllLiveCalls = () => {
     });
   });
 };
-
 io.on("connection", (socket) => {
   let prevData = null;
-
   const getVerifyDoc = ({ id }) => {
     return new Promise((resolve, reject) => {
       const query = `
-          SELECT 
-            CASE 
+          SELECT
+            CASE
               WHEN is_verified_doc = 0 THEN 0
               WHEN is_verified_doc = 1 THEN 1
               WHEN is_verified_doc = 2 THEN 2
@@ -118,7 +113,6 @@ io.on("connection", (socket) => {
           FROM users
           WHERE id = ${id};
         `;
-
       connection.query(query, (err, results) => {
         if (err) {
           return reject(err);
@@ -129,7 +123,6 @@ io.on("connection", (socket) => {
       });
     });
   };
-
   const pollStatus = async (userdata, previousStatus) => {
     try {
       const result = await getVerifyDoc(userdata);
@@ -147,7 +140,6 @@ io.on("connection", (socket) => {
       setTimeout(() => pollStatus(userdata, previousStatus), 2000);
     }
   };
-
   const getDocumentsCount = () => {
     return new Promise((resolve, reject) => {
       const query = `SELECT count(*) as count FROM user_documents`;
@@ -164,7 +156,6 @@ io.on("connection", (socket) => {
       });
     });
   };
-
   const getBalanceByCompany = (id) => {
     return new Promise((resolve, reject) => {
       const query = `SELECT id,company_name,email, balance FROM companies where id = ${id}`;
@@ -178,12 +169,10 @@ io.on("connection", (socket) => {
       });
     });
   };
-
   socket.on("allUsers", function () {
     const userdata = socket.handshake.session.userdata;
     socket.emit("getUsers", { data: userdata });
   });
-
   socket.on("login", async (userdata) => {
     socket.handshake.session.userdata = userdata;
     socket.handshake.session.save(async (err) => {
@@ -192,7 +181,6 @@ io.on("connection", (socket) => {
       }
     });
   });
-
   socket.on("changeDocCount", async () => {
     const role_id = socket.handshake.session.userdata.role_id;
     if (["1", "2", "3"].includes(role_id)) {
@@ -201,13 +189,10 @@ io.on("connection", (socket) => {
       }, 5000);
     }
   });
-
   socket.on("fetchBalanceReq", async (id) => {
     await getBalanceByCompany(id);
   });
-
   let company_id;
-
   socket.on("fetchLiveCallsReq", async (data) => {
     try {
       company_id = data.company_id;
@@ -217,7 +202,6 @@ io.on("connection", (socket) => {
       socket.emit("getLiveCallsRes", { error: "Internal server error" });
     }
   });
-
   const fetchLiveCallsInterval = setInterval(async () => {
     if (company_id) {
       const data = { company_id: company_id };
@@ -225,11 +209,9 @@ io.on("connection", (socket) => {
       socket.emit("getLiveCallsRes", liveCalls);
     }
   }, 1000);
-
   socket.on("disconnect", () => {
     clearInterval(fetchLiveCallsInterval);
   });
-
   socket.on("fetchWaitingCallsReq", async (data) => {
     try {
       company_id = data.company_id;
@@ -239,7 +221,6 @@ io.on("connection", (socket) => {
       socket.emit("getWaitingCallsRes", { error: "Internal server error" });
     }
   });
-
   const fetchWaitingCallsInterval = setInterval(async () => {
     if (company_id) {
       const data = { company_id: company_id };
@@ -247,13 +228,10 @@ io.on("connection", (socket) => {
       socket.emit("getWaitingCallsRes", waitingCalls);
     }
   }, 1000);
-
   socket.on("disconnect", () => {
     clearInterval(fetchWaitingCallsInterval);
   });
-
   let slug;
-
   socket.on("fetchAllWaitingCallsReq", async (data) => {
     try {
       slug = data.slug;
@@ -263,18 +241,15 @@ io.on("connection", (socket) => {
       socket.emit("getAllWaitingCallsRes", { error: "Internal server error" });
     }
   });
-
   const fetchAllWaitingCallsInterval = setInterval(async () => {
     if (["super-admin", "noc", "support", "reseller"].includes(slug)) {
       const waitingCalls = await getAllWaitingCalls();
       socket.emit("getAllWaitingCallsRes", waitingCalls);
     }
   }, 1000);
-
   socket.on("disconnect", () => {
     clearInterval(fetchAllWaitingCallsInterval);
   });
-
   socket.on("fetchAllLiveCallsReq", async (data) => {
     try {
       slug = data.slug;
@@ -284,18 +259,15 @@ io.on("connection", (socket) => {
       socket.emit("getAllAllCallsRes", { error: "Internal server error" });
     }
   });
-
   const fetchAllLiveCallsInterval = setInterval(async () => {
     if (["super-admin", "noc", "support", "reseller"].includes(slug)) {
       const fetchAllLiveCallsInterval = await getAllLiveCalls();
       socket.emit("getAllAllCallsRes", fetchAllLiveCallsInterval);
     }
   }, 1000);
-
   socket.on("disconnect", () => {
     clearInterval(fetchAllLiveCallsInterval);
   });
-
   socket.on("logout", function () {
     if (socket.handshake.session.userdata) {
       delete socket.handshake.session.userdata;

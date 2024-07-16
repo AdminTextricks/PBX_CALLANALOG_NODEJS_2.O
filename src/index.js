@@ -78,7 +78,7 @@ const getWaitingCalls = ({ company_id }) => {
 const getAllWaitingCalls = () => {
   return new Promise((resolve, reject) => {
     const query = `
-     SELECT companies.company_name, companies.email, countries.country_name, startcall, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
+     SELECT companies.company_name, companies.email, countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
      left join companies on live_calls.company_id = companies.id
      left join countries on live_calls.country_id = countries.id
      where live_calls.call_status=2
@@ -232,7 +232,7 @@ io.on("connection", (socket) => {
       const liveCalls = await getLiveCalls(data);
       socket.emit("getLiveCallsRes", liveCalls);
     }
-  }, 5000);
+  }, 1000);
 
   socket.on("disconnect", () => {
     clearInterval(fetchLiveCallsInterval);
@@ -254,7 +254,7 @@ io.on("connection", (socket) => {
       const waitingCalls = await getWaitingCalls(data);
       socket.emit("getWaitingCallsRes", waitingCalls);
     }
-  }, 155000);
+  }, 1000);
 
   socket.on("disconnect", () => {
     clearInterval(fetchWaitingCallsInterval);
@@ -277,7 +277,7 @@ io.on("connection", (socket) => {
       const waitingCalls = await getAllWaitingCalls();
       socket.emit("getAllWaitingCallsRes", waitingCalls);
     }
-  }, 2000);
+  }, 1000);
 
   socket.on("disconnect", () => {
     clearInterval(fetchAllWaitingCallsInterval);
@@ -298,7 +298,7 @@ io.on("connection", (socket) => {
       const fetchAllLiveCallsInterval = await getAllLiveCalls();
       socket.emit("getAllAllCallsRes", fetchAllLiveCallsInterval);
     }
-  }, 2000);
+  }, 1000);
 
   socket.on("disconnect", () => {
     clearInterval(fetchAllLiveCallsInterval);

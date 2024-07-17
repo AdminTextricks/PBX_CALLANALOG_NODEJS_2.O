@@ -11,12 +11,14 @@ const PORT = 8001;
 // Middleware
 app.use(bodyParser.json());
 //app.use(cors({ origin: "*" }));
-app.use(cors({
-  origin: 'https://pbx.callanalog.com'
-}));
+app.use(
+  cors({
+    origin: process.env.CORS_FRONTEND_URL,
+  })
+);
 const sessionStore = new MySQLStore(connection);
 const sessionMiddleware = session({
-  secret: "12345",
+  secret: process.env.SESSION_SECRET_KEY,
   resave: false, // Set to false to avoid unnecessary session resaving
   saveUninitialized: false, // Set to false to avoid saving uninitialized sessions
   store: sessionStore,
@@ -32,7 +34,9 @@ const server = app.listen(PORT, console.log("Server is Running...", PORT));
 const io = require("socket.io")(server, {
   cors: { origin: "*" },
 });
+
 io.use(sharedsession(sessionMiddleware));
+
 const getLiveCalls = ({ company_id }) => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -49,6 +53,7 @@ const getLiveCalls = ({ company_id }) => {
     });
   });
 };
+
 const getWaitingCalls = ({ company_id }) => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -65,6 +70,7 @@ const getWaitingCalls = ({ company_id }) => {
     });
   });
 };
+
 const getAllWaitingCalls = () => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -81,6 +87,7 @@ const getAllWaitingCalls = () => {
     });
   });
 };
+
 const getAllLiveCalls = () => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -97,8 +104,11 @@ const getAllLiveCalls = () => {
     });
   });
 };
+
 io.on("connection", (socket) => {
   let prevData = null;
+  let slug;
+
   const getVerifyDoc = ({ id }) => {
     return new Promise((resolve, reject) => {
       const query = `
@@ -123,6 +133,7 @@ io.on("connection", (socket) => {
       });
     });
   };
+
   const pollStatus = async (userdata, previousStatus) => {
     try {
       const result = await getVerifyDoc(userdata);
@@ -140,6 +151,7 @@ io.on("connection", (socket) => {
       setTimeout(() => pollStatus(userdata, previousStatus), 2000);
     }
   };
+
   const getDocumentsCount = () => {
     return new Promise((resolve, reject) => {
       const query = `SELECT count(*) as count FROM user_documents`;
@@ -156,6 +168,7 @@ io.on("connection", (socket) => {
       });
     });
   };
+
   const getBalanceByCompany = (id) => {
     return new Promise((resolve, reject) => {
       const query = `SELECT id,company_name,email, balance FROM companies where id = ${id}`;
@@ -169,30 +182,46 @@ io.on("connection", (socket) => {
       });
     });
   };
+
   socket.on("allUsers", function () {
     const userdata = socket.handshake.session.userdata;
     socket.emit("getUsers", { data: userdata });
   });
+
   socket.on("login", async (userdata) => {
     socket.handshake.session.userdata = userdata;
     socket.handshake.session.save(async (err) => {
-      if (!err && userdata.is_verified_doc !== 1) {
+      if (userdata.is_verified_doc !== 1) {
         pollStatus(userdata, null);
       }
     });
   });
-  socket.on("changeDocCount", async () => {
-    const role_id = socket.handshake.session.userdata.role_id;
-    if (["1", "2", "3"].includes(role_id)) {
-      setInterval(async () => {
-        await getDocumentsCount();
-      }, 5000);
+
+  //Upload documents notification
+  socket.on("handleFetchNewDocs", async ({ params }) => {
+    try {
+      await getDocumentsCount();
+    } catch (error) {
+      console.log("Error");
     }
   });
+  const fetchAllDocs = setInterval(async () => {
+    if (["super-admin", "noc", "support"].includes(slug)) {
+      await getDocumentsCount();
+    }
+  }, 3000);
+  socket.on("disconnect", () => {
+    clearInterval(fetchAllDocs);
+  });
+
+  //balance
   socket.on("fetchBalanceReq", async (id) => {
     await getBalanceByCompany(id);
   });
+
   let company_id;
+
+  //Live calls
   socket.on("fetchLiveCallsReq", async (data) => {
     try {
       company_id = data.company_id;
@@ -212,6 +241,8 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     clearInterval(fetchLiveCallsInterval);
   });
+
+  //Waiting calls
   socket.on("fetchWaitingCallsReq", async (data) => {
     try {
       company_id = data.company_id;
@@ -231,7 +262,8 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     clearInterval(fetchWaitingCallsInterval);
   });
-  let slug;
+
+  //All Waiting calls
   socket.on("fetchAllWaitingCallsReq", async (data) => {
     try {
       slug = data.slug;
@@ -250,6 +282,8 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     clearInterval(fetchAllWaitingCallsInterval);
   });
+
+  //All Live calls
   socket.on("fetchAllLiveCallsReq", async (data) => {
     try {
       slug = data.slug;
@@ -268,6 +302,7 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     clearInterval(fetchAllLiveCallsInterval);
   });
+
   socket.on("logout", function () {
     if (socket.handshake.session.userdata) {
       delete socket.handshake.session.userdata;

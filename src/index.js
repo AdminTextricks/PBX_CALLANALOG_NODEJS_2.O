@@ -14,10 +14,12 @@ app.use(bodyParser.json());
 app.use(
   cors({
     origin: process.env.CORS_FRONTEND_URL,
+    credentials: true,
   })
 );
 const sessionStore = new MySQLStore(connection);
 const sessionMiddleware = session({
+  key: "cookie_id",
   secret: process.env.SESSION_SECRET_KEY,
   resave: false, // Set to false to avoid unnecessary session resaving
   saveUninitialized: false, // Set to false to avoid saving uninitialized sessions
@@ -30,12 +32,20 @@ app.use(express.json());
 app.get("/", (_, res) => {
   res.send("Server running...");
 });
+
 const server = app.listen(PORT, console.log("Server is Running...", PORT));
 const io = require("socket.io")(server, {
   cors: { origin: "*" },
 });
 
-io.use(sharedsession(sessionMiddleware));
+io.use(sharedsession(sessionMiddleware, {
+  autoSave: true // Ensure session is saved automatically
+}));
+
+io.use((socket, next) => {
+  sessionMiddleware(socket.request, {}, next);
+  next();
+});
 
 const getLiveCalls = ({ company_id }) => {
   return new Promise((resolve, reject) => {
@@ -106,8 +116,12 @@ const getAllLiveCalls = () => {
 };
 
 io.on("connection", (socket) => {
+  console.log("Socket Session ID:", socket.handshake.sessionID);
+  console.log("Socket Session:", socket.handshake.session);
+
   let prevData = null;
   let slug;
+  let company_id;
 
   const getVerifyDoc = ({ id }) => {
     return new Promise((resolve, reject) => {
@@ -189,6 +203,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("login", async (userdata) => {
+    console.log(">>>>>>>");
     socket.handshake.session.userdata = userdata;
     socket.handshake.session.save(async (err) => {
       if (userdata.is_verified_doc !== 1) {
@@ -218,8 +233,6 @@ io.on("connection", (socket) => {
   socket.on("fetchBalanceReq", async (id) => {
     await getBalanceByCompany(id);
   });
-
-  let company_id;
 
   //Live calls
   socket.on("fetchLiveCallsReq", async (data) => {
@@ -309,4 +322,10 @@ io.on("connection", (socket) => {
       socket.handshake.session.save();
     }
   });
+});
+
+app.use((req, res, next) => {
+  console.log("Session ID:", req.sessionID);
+  console.log("Session:", req.session);
+  next();
 });

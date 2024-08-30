@@ -13,21 +13,24 @@ const PORT = 8001;
 // Middleware
 app.use(bodyParser.json());
 //app.use(cors({ origin: "*" }));
-app.use(
-  cors({
-    origin: process.env.CORS_FRONTEND_URL,
-    credentials: true,
-  })
-);
+app.use(cors({
+  origin: process.env.CORS_FRONTEND_URL,
+  credentials: true
+}));
 const sessionStore = new MySQLStore(connection);
 const sessionMiddleware = session({
   key: "cookie_id",
   secret: process.env.SESSION_SECRET_KEY,
-  resave: false, // Set to false to avoid unnecessary session resaving
-  saveUninitialized: false, // Set to false to avoid saving uninitialized sessions
+  resave: false,
+  // Set to false to avoid unnecessary session resaving
+  saveUninitialized: false,
+  // Set to false to avoid saving uninitialized sessions
   store: sessionStore,
-  cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8 hours in milliseconds
-  secure: true,
+  cookie: {
+    maxAge: 8 * 60 * 60 * 1000
+  },
+  // 8 hours in milliseconds
+  secure: true
 });
 app.use(sessionMiddleware);
 app.use(express.json());
@@ -35,36 +38,32 @@ app.use(express.json());
 app.get("/", (_, res) => {
   res.send("Server running...");
 });
-
 const server = app.listen(PORT, console.log("Server is Running...", PORT));
 const io = require("socket.io")(server, {
-  cors: { origin: "*" },
+  cors: {
+    origin: "*"
+  }
 });
-
-io.use(
-  sharedsession(sessionMiddleware, {
-    autoSave: true, // Ensure session is saved automatically
-  })
-);
-
+io.use(sharedsession(sessionMiddleware, {
+  autoSave: true // Ensure session is saved automatically
+}));
 io.use((socket, next) => {
   sessionMiddleware(socket.request, {}, next);
   next();
 });
-
-const generateHash = (data) => {
-  const cleanedData = data.map((item) => {
-    const { updated_at, ...rest } = item; // Exclude updated_at
+const generateHash = data => {
+  const cleanedData = data.map(item => {
+    const {
+      updated_at,
+      ...rest
+    } = item; // Exclude updated_at
     return rest;
   });
-
-  return crypto
-    .createHash("md5")
-    .update(JSON.stringify(cleanedData))
-    .digest("hex");
+  return crypto.createHash("md5").update(JSON.stringify(cleanedData)).digest("hex");
 };
-
-const getLiveCalls = ({ company_id }) => {
+const getLiveCalls = ({
+  company_id
+}) => {
   return new Promise((resolve, reject) => {
     const query = `
       SELECT companies.company_name, companies.email, companies.id as company_id , countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
@@ -80,8 +79,9 @@ const getLiveCalls = ({ company_id }) => {
     });
   });
 };
-
-const getWaitingCalls = ({ company_id }) => {
+const getWaitingCalls = ({
+  company_id
+}) => {
   return new Promise((resolve, reject) => {
     const query = `
       SELECT companies.company_name, companies.email, countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
@@ -97,7 +97,6 @@ const getWaitingCalls = ({ company_id }) => {
     });
   });
 };
-
 const getAllWaitingCalls = () => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -114,7 +113,6 @@ const getAllWaitingCalls = () => {
     });
   });
 };
-
 const getAllLiveCalls = () => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -131,19 +129,17 @@ const getAllLiveCalls = () => {
     });
   });
 };
-
-io.on("connection", (socket) => {
+io.on("connection", socket => {
   let prevData = null;
   let slug;
   let company_id;
-
   let previousCompanyLiveCallsHash = "";
   let previousCompanyWaitingCallsHash = "";
-
   let previousWaitingCallsHash = "";
   let previousLiveCallsHash = "";
-
-  const getVerifyDoc = ({ id }) => {
+  const getVerifyDoc = ({
+    id
+  }) => {
     return new Promise((resolve, reject) => {
       const query = `
           SELECT
@@ -161,13 +157,11 @@ io.on("connection", (socket) => {
         if (err) {
           return reject(err);
         }
-        const statusMessage =
-          results.length > 0 ? results[0].status_message : "No record found";
+        const statusMessage = results.length > 0 ? results[0].status_message : "No record found";
         resolve(statusMessage);
       });
     });
   };
-
   const pollStatus = async (userdata, previousStatus) => {
     try {
       const result = await getVerifyDoc(userdata);
@@ -175,7 +169,7 @@ io.on("connection", (socket) => {
       if (currentStatus !== previousStatus) {
         socket.emit("isVerifiedDoc", {
           userId: userdata.id,
-          statusMessage: result,
+          statusMessage: result
         });
       }
       if (currentStatus != 1) {
@@ -185,7 +179,6 @@ io.on("connection", (socket) => {
       setTimeout(() => pollStatus(userdata, previousStatus), 2000);
     }
   };
-
   const getDocumentsCount = () => {
     return new Promise((resolve, reject) => {
       const query = `SELECT count(*) as count FROM user_documents`;
@@ -195,15 +188,16 @@ io.on("connection", (socket) => {
         }
         const currentCount = results[0]?.count;
         if (prevData !== null && currentCount !== prevData) {
-          socket.emit("changeDocCount", { count: currentCount });
+          socket.emit("changeDocCount", {
+            count: currentCount
+          });
         }
         prevData = currentCount;
         resolve(currentCount);
       });
     });
   };
-
-  const getBalanceByCompany = (id) => {
+  const getBalanceByCompany = id => {
     return new Promise((resolve, reject) => {
       const query = `SELECT id,company_name,email, balance FROM companies where id = ${id}`;
       connection.query(query, (err, results) => {
@@ -216,15 +210,15 @@ io.on("connection", (socket) => {
       });
     });
   };
-
   socket.on("allUsers", function () {
     const userdata = socket.handshake.session.userdata;
-    socket.emit("getUsers", { data: userdata });
+    socket.emit("getUsers", {
+      data: userdata
+    });
   });
-
-  socket.on("login", async (userdata) => {
+  socket.on("login", async userdata => {
     socket.handshake.session.userdata = userdata;
-    socket.handshake.session.save(async (err) => {
+    socket.handshake.session.save(async err => {
       if (userdata.is_verified_doc !== 1) {
         pollStatus(userdata, null);
       }
@@ -232,7 +226,9 @@ io.on("connection", (socket) => {
   });
 
   //Upload documents notification
-  socket.on("handleFetchNewDocs", async ({ params }) => {
+  socket.on("handleFetchNewDocs", async ({
+    params
+  }) => {
     try {
       await getDocumentsCount();
     } catch (error) {
@@ -249,24 +245,28 @@ io.on("connection", (socket) => {
   });
 
   //balance
-  socket.on("fetchBalanceReq", async (id) => {
+  socket.on("fetchBalanceReq", async id => {
     await getBalanceByCompany(id);
   });
 
   //Live calls
-  socket.on("fetchLiveCallsReq", async (data) => {
+  socket.on("fetchLiveCallsReq", async data => {
     try {
       company_id = data.company_id;
       const liveCalls = await getLiveCalls(data);
       socket.emit("getLiveCallsRes", liveCalls);
       previousCompanyLiveCallsHash = generateHash(liveCalls); // Store hash after first fetch
     } catch (error) {
-      socket.emit("getLiveCallsRes", { error: "Internal server error" });
+      socket.emit("getLiveCallsRes", {
+        error: "Internal server error"
+      });
     }
   });
   const fetchLiveCallsInterval = setInterval(async () => {
     if (company_id) {
-      const data = { company_id: company_id };
+      const data = {
+        company_id: company_id
+      };
       const liveCalls = await getLiveCalls(data);
       const currentHash = generateHash(liveCalls);
       if (currentHash !== previousCompanyLiveCallsHash) {
@@ -280,19 +280,23 @@ io.on("connection", (socket) => {
   });
 
   //Waiting calls
-  socket.on("fetchWaitingCallsReq", async (data) => {
+  socket.on("fetchWaitingCallsReq", async data => {
     try {
       company_id = data.company_id;
       const waitingCalls = await getWaitingCalls(data);
       socket.emit("getWaitingCallsRes", waitingCalls);
       previousCompanyWaitingCallsHash = generateHash(waitingCalls);
     } catch (error) {
-      socket.emit("getWaitingCallsRes", { error: "Internal server error" });
+      socket.emit("getWaitingCallsRes", {
+        error: "Internal server error"
+      });
     }
   });
   const fetchWaitingCallsInterval = setInterval(async () => {
     if (company_id) {
-      const data = { company_id: company_id };
+      const data = {
+        company_id: company_id
+      };
       const waitingCalls = await getWaitingCalls(data);
       const currentHash = generateHash(waitingCalls);
       if (currentHash !== previousCompanyWaitingCallsHash) {
@@ -306,14 +310,16 @@ io.on("connection", (socket) => {
   });
 
   //All Waiting calls
-  socket.on("fetchAllWaitingCallsReq", async (data) => {
+  socket.on("fetchAllWaitingCallsReq", async data => {
     try {
       slug = data.slug;
       const waitingCalls = await getAllWaitingCalls();
       socket.emit("getAllWaitingCallsRes", waitingCalls);
       previousWaitingCallsHash = generateHash(waitingCalls); // Store hash after first fetch
     } catch (error) {
-      socket.emit("getAllWaitingCallsRes", { error: "Internal server error" });
+      socket.emit("getAllWaitingCallsRes", {
+        error: "Internal server error"
+      });
     }
   });
   const fetchAllWaitingCallsInterval = setInterval(async () => {
@@ -326,7 +332,9 @@ io.on("connection", (socket) => {
           previousWaitingCallsHash = currentHash;
         }
       } catch (error) {
-        socket.emit("getAllAllCallsRes", { error: "Internal server error" });
+        socket.emit("getAllAllCallsRes", {
+          error: "Internal server error"
+        });
       }
     }
   }, 1000);
@@ -335,14 +343,16 @@ io.on("connection", (socket) => {
   });
 
   //All Live calls
-  socket.on("fetchAllLiveCallsReq", async (data) => {
+  socket.on("fetchAllLiveCallsReq", async data => {
     try {
       slug = data.slug;
       const allLiveCalls = await getAllLiveCalls();
       socket.emit("getAllAllCallsRes", allLiveCalls);
       previousLiveCallsHash = generateHash(allLiveCalls); // Store hash after first fetch
     } catch (error) {
-      socket.emit("getAllAllCallsRes", { error: "Internal server error" });
+      socket.emit("getAllAllCallsRes", {
+        error: "Internal server error"
+      });
     }
   });
   const fetchAllLiveCallsInterval = setInterval(async () => {
@@ -355,14 +365,15 @@ io.on("connection", (socket) => {
           previousLiveCallsHash = currentHash;
         }
       } catch (error) {
-        socket.emit("getAllAllCallsRes", { error: "Internal server error" });
+        socket.emit("getAllAllCallsRes", {
+          error: "Internal server error"
+        });
       }
     }
   }, 1000);
   socket.on("disconnect", () => {
     clearInterval(fetchAllLiveCallsInterval);
   });
-
   socket.on("logout", function () {
     if (socket.handshake.session.userdata) {
       delete socket.handshake.session.userdata;
@@ -370,7 +381,7 @@ io.on("connection", (socket) => {
     }
   });
 });
-
 app.use((req, res, next) => {
   next();
 });
+//# sourceMappingURL=index.js.map

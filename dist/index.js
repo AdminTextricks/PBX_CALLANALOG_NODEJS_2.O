@@ -1,25 +1,57 @@
+require("dotenv").config();
 const express = require("express");
-const http = require("http");
-const WebSocket = require("ws");
 const cors = require("cors");
+const bodyParser = require("body-parser");
+const session = require("express-session");
+const sharedsession = require("express-socket.io-session");
 const connection = require("./db");
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({
-  server
-});
 const crypto = require("crypto");
+const MySQLStore = require("express-mysql-session")(session);
+const PORT = 8001;
 
-// Enable CORS
+// Middleware
+app.use(bodyParser.json());
+//app.use(cors({ origin: "*" }));
 app.use(cors({
   origin: process.env.CORS_FRONTEND_URL,
   credentials: true
 }));
-function generateHash(data) {
-  // Ensure data is an array
-  if (!Array.isArray(data)) {
-    return null; // Or handle it as needed
+const sessionStore = new MySQLStore(connection);
+const sessionMiddleware = session({
+  key: "cookie_id",
+  secret: process.env.SESSION_SECRET_KEY,
+  resave: false,
+  // Set to false to avoid unnecessary session resaving
+  saveUninitialized: false,
+  // Set to false to avoid saving uninitialized sessions
+  store: sessionStore,
+  cookie: {
+    maxAge: 8 * 60 * 60 * 1000
+  },
+  // 8 hours in milliseconds
+  secure: true
+});
+app.use(sessionMiddleware);
+app.use(express.json());
+// Routes
+app.get("/", (_, res) => {
+  res.send("Server running...");
+});
+const server = app.listen(PORT, console.log("Server is Running...", PORT));
+const io = require("socket.io")(server, {
+  cors: {
+    origin: "*"
   }
+});
+io.use(sharedsession(sessionMiddleware, {
+  autoSave: true // Ensure session is saved automatically
+}));
+io.use((socket, next) => {
+  sessionMiddleware(socket.request, {}, next);
+  next();
+});
+const generateHash = data => {
   const cleanedData = data.map(item => {
     const {
       updated_at,
@@ -28,346 +60,328 @@ function generateHash(data) {
     return rest;
   });
   return crypto.createHash("md5").update(JSON.stringify(cleanedData)).digest("hex");
-}
-
-// connection.connect((err) => {
-//   if (err) throw err;
-//   console.log("Connected to MySQL");
-// });
-
-// Handle process termination to close MySQL connection gracefully
-process.on("SIGINT", () => {
-  console.log("Received SIGINT. Closing MySQL connection and shutting down server.");
-  connection.end(err => {
-    if (err) {
-      console.error("Error closing MySQL connection:", err);
-    } else {
-      console.log("MySQL connection closed.");
-    }
-    process.exit(0); // Exit the process
+};
+const getLiveCalls = ({
+  company_id
+}) => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT companies.company_name, companies.email, companies.id as company_id , countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
+      left join companies on live_calls.company_id = companies.id
+      left join countries on live_calls.country_id = countries.id
+      where live_calls.call_status=3 and live_calls.company_id= ${company_id}
+    `;
+    connection.query(query, (err, results) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(results);
+    });
   });
-});
-process.on("SIGTERM", () => {
-  console.log("Received SIGTERM. Closing MySQL connection and shutting down server.");
-  connection.end(err => {
-    if (err) {
-      console.error("Error closing MySQL connection:", err);
-    } else {
-      console.log("MySQL connection closed.");
-    }
-    process.exit(0); // Exit the process
+};
+const getWaitingCalls = ({
+  company_id
+}) => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT companies.company_name, companies.email, countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
+      left join companies on live_calls.company_id = companies.id
+      left join countries on live_calls.country_id = countries.id
+      where live_calls.call_status=2 and live_calls.company_id= ${company_id}
+    `;
+    connection.query(query, (err, results) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(results);
+    });
   });
-});
-
-// WebSocket connection
-// Existing WebSocket connection code
-wss.on("connection", ws => {
-  let userId = null;
-  let currentBalance = null;
+};
+const getAllWaitingCalls = () => {
+  return new Promise((resolve, reject) => {
+    const query = `
+     SELECT companies.company_name, companies.email, countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
+     left join companies on live_calls.company_id = companies.id
+     left join countries on live_calls.country_id = countries.id
+     where live_calls.call_status=2
+    `;
+    connection.query(query, (err, results) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(results);
+    });
+  });
+};
+const getAllLiveCalls = () => {
+  return new Promise((resolve, reject) => {
+    const query = `
+     SELECT companies.company_name, companies.email, companies.id as company_id , countries.country_name, ip, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
+     left join companies on live_calls.company_id = companies.id
+     left join countries on live_calls.country_id = countries.id
+     where live_calls.call_status=3
+    `;
+    connection.query(query, (err, results) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(results);
+    });
+  });
+};
+io.on("connection", socket => {
+  let prevData = null;
+  let slug;
+  let company_id;
   let previousCompanyLiveCallsHash = "";
-  let previousCompanyWaitCallsHash = "";
-
-  // Handle balance fetching
-  ws.on("message", message => {
-    const data = JSON.parse(message);
-    if (data.action === "fetchBalance") {
-      userId = data.userId;
-
-      // Function to fetch balance
-      const fetchBalance = callback => {
-        connection.query("SELECT id, company_name, email, balance FROM companies WHERE id = ?", [userId], (err, results) => {
-          if (err) {
-            console.error("Database query error:", err);
-            return callback(null);
-          }
-          callback(results[0] ? results[0].balance : null);
-        });
-      };
-
-      // Initial balance fetch
-      fetchBalance(initialBalance => {
-        currentBalance = initialBalance;
-        ws.send(JSON.stringify({
-          balance: currentBalance
-        }));
-
-        // Balance update interval
-        const balanceInterval = setInterval(() => {
-          fetchBalance(newBalance => {
-            if (newBalance !== currentBalance) {
-              ws.send(JSON.stringify({
-                balance: newBalance
-              }));
-              currentBalance = newBalance;
-            }
-          });
-        }, 2000);
-
-        // Clear the interval on WebSocket close
-        ws.on("close", () => {
-          clearInterval(balanceInterval);
-        });
+  let previousCompanyWaitingCallsHash = "";
+  let previousWaitingCallsHash = "";
+  let previousLiveCallsHash = "";
+  const getVerifyDoc = ({
+    id
+  }) => {
+    return new Promise((resolve, reject) => {
+      const query = `
+          SELECT
+            CASE
+              WHEN is_verified_doc = 0 THEN 0
+              WHEN is_verified_doc = 1 THEN 1
+              WHEN is_verified_doc = 2 THEN 2
+              WHEN is_verified_doc = 3 THEN 3
+              ELSE 'Unknown status'
+            END AS status_message
+          FROM users
+          WHERE id = ${id};
+        `;
+      connection.query(query, (err, results) => {
+        if (err) {
+          return reject(err);
+        }
+        const statusMessage = results.length > 0 ? results[0].status_message : "No record found";
+        resolve(statusMessage);
       });
+    });
+  };
+  const pollStatus = async (userdata, previousStatus) => {
+    try {
+      const result = await getVerifyDoc(userdata);
+      const currentStatus = result;
+      if (currentStatus !== previousStatus) {
+        socket.emit("isVerifiedDoc", {
+          userId: userdata.id,
+          statusMessage: result
+        });
+      }
+      if (currentStatus != 1) {
+        setTimeout(() => pollStatus(userdata, currentStatus), 2000);
+      }
+    } catch (error) {
+      setTimeout(() => pollStatus(userdata, previousStatus), 2000);
     }
-    if (data.action === "fetchResellerBalance") {
-      userId = data.userId;
-
-      // Function to fetch the balance
-      const fetchBalance = callback => {
-        connection.query("SELECT balance FROM `reseller_wallets` WHERE user_id = ?", [userId], (err, results) => {
-          if (err) {
-            console.error("Database query error:", err);
-            callback(null);
-          } else {
-            callback(results[0] ? results[0].balance : null);
-          }
-        });
-      };
-
-      // Initial balance fetch
-      fetchBalance(initialBalance => {
-        currentBalance = initialBalance;
-        ws.send(JSON.stringify({
-          balance: currentBalance
-        }));
-
-        // Balance update interval
-        const balanceInterval = setInterval(() => {
-          fetchBalance(newBalance => {
-            if (newBalance !== currentBalance) {
-              ws.send(JSON.stringify({
-                balance: newBalance
-              }));
-              currentBalance = newBalance;
-            }
+  };
+  const getDocumentsCount = () => {
+    return new Promise((resolve, reject) => {
+      const query = `SELECT count(*) as count FROM user_documents`;
+      connection.query(query, (err, results) => {
+        if (err) {
+          return reject(err);
+        }
+        const currentCount = results[0]?.count;
+        if (prevData !== null && currentCount !== prevData) {
+          socket.emit("changeDocCount", {
+            count: currentCount
           });
-        }, 2000);
-
-        // Clear the interval on WebSocket close
-        ws.on("close", () => {
-          clearInterval(balanceInterval);
-        });
+        }
+        prevData = currentCount;
+        resolve(currentCount);
       });
-    }
-    if (data.action === "fetchCompanyLivecalls") {
-      userId = data.userId;
-      const fetchBalance = callback => {
-        const query = `
-          SELECT 
-            companies.company_name, 
-            companies.email, 
-            companies.id AS company_id, 
-            countries.country_name, 
-            caller_num, 
-            agent_channel, 
-            agent_name, 
-            agent_number, 
-            call_status, 
-            call_type, 
-            tfn, 
-            destination_type, 
-            destination, 
-            live_calls.created_at, 
-            live_calls.updated_at 
-          FROM 
-            live_calls 
-          LEFT JOIN 
-            companies ON live_calls.company_id = companies.id 
-          LEFT JOIN 
-            countries ON live_calls.country_id = countries.id 
-          WHERE 
-            live_calls.call_status = 3 AND 
-            live_calls.company_id = ?`;
-        connection.query(query, [userId], (err, results) => {
-          if (err) {
-            return callback(null);
-          }
-          callback(results ? results : null);
-        });
-      };
-
-      // Initial balance fetch
-      fetchBalance(initialBalance => {
-        previousCompanyLiveCallsHash = generateHash(initialBalance);
-        ws.send(JSON.stringify({
-          initialBalance
-        }));
-
-        // Balance update interval
-        const balanceInterval = setInterval(() => {
-          fetchBalance(livecalls => {
-            ws.send(JSON.stringify({
-              livecalls
-            }));
-            const currentHash = generateHash(livecalls);
-            if (previousCompanyLiveCallsHash !== currentHash) {
-              ws.send(JSON.stringify({
-                livecalls
-              }));
-              previousCompanyLiveCallsHash = generateHash(currentHash);
-            }
-          });
-        }, 1000);
-
-        // Clear the interval on WebSocket close
-        ws.on("close", () => {
-          clearInterval(balanceInterval);
-        });
+    });
+  };
+  const getBalanceByCompany = id => {
+    return new Promise((resolve, reject) => {
+      const query = `SELECT id,company_name,email, balance FROM companies where id = ${id}`;
+      connection.query(query, (err, results) => {
+        if (err) {
+          return reject(err);
+        }
+        const currentBalalnce = results[0]?.balance;
+        socket.emit("fetchBalance", currentBalalnce);
+        resolve(currentBalalnce);
       });
+    });
+  };
+  socket.on("allUsers", function () {
+    const userdata = socket.handshake.session.userdata;
+    socket.emit("getUsers", {
+      data: userdata
+    });
+  });
+  socket.on("login", async userdata => {
+    socket.handshake.session.userdata = userdata;
+    socket.handshake.session.save(async err => {
+      if (userdata.is_verified_doc !== 1) {
+        pollStatus(userdata, null);
+      }
+    });
+  });
+
+  //Upload documents notification
+  socket.on("handleFetchNewDocs", async ({
+    params
+  }) => {
+    try {
+      await getDocumentsCount();
+    } catch (error) {
+      console.log("Error");
     }
-    if (data.action === "fetchCompanyWaitingcalls") {
-      userId = data.userId;
-      const fetchWaitBalance = callback => {
-        const query = `
-             SELECT companies.company_name, companies.email, countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls left join companies on live_calls.company_id = companies.id left join countries on live_calls.country_id = countries.id where live_calls.call_status=2 and live_calls.company_id = ?`;
-        connection.query(query, [userId], (err, results) => {
-          if (err) {
-            return callback([]);
-          }
-          callback(results && results.length > 0 ? results : []);
-        });
-      };
-
-      // Initial balance fetch
-      fetchWaitBalance(initialBalance => {
-        previousCompanyWaitCallsHash = generateHash(initialBalance);
-        ws.send(JSON.stringify({
-          initialBalance
-        }));
-
-        // Balance update interval
-        const balanceInterval = setInterval(() => {
-          fetchWaitBalance(waitcalls => {
-            ws.send(JSON.stringify({
-              waitcalls
-            }));
-            const currentHash = generateHash(waitcalls);
-            if (previousCompanyWaitCallsHash !== currentHash) {
-              ws.send(JSON.stringify({
-                waitcalls
-              }));
-              previousCompanyWaitCallsHash = generateHash(currentHash);
-            }
-          });
-        }, 1000);
-
-        // Clear the interval on WebSocket close
-        ws.on("close", () => {
-          clearInterval(balanceInterval);
-        });
-      });
+  });
+  const fetchAllDocs = setInterval(async () => {
+    if (["super-admin", "noc", "support"].includes(slug)) {
+      await getDocumentsCount();
     }
-    if (data.action === "fetchAllWaitingcalls") {
-      const fetchWaitCalls = callback => {
-        const query = `
-            SELECT companies.company_name, companies.email, countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls
-            left join companies on live_calls.company_id = companies.id left join countries on live_calls.country_id = countries.id where live_calls.call_status=2`;
-        connection.query(query, (err, results) => {
-          if (err) {
-            return callback([]);
-          }
-          callback(results && results.length > 0 ? results : []);
-        });
-      };
+  }, 3000);
+  socket.on("disconnect", () => {
+    clearInterval(fetchAllDocs);
+  });
 
-      // Initial balance fetch
-      fetchWaitCalls(initialCalls => {
-        previousCompanyWaitCallsHash = generateHash(initialCalls);
-        ws.send(JSON.stringify({
-          initialCalls
-        }));
+  //balance
+  socket.on("fetchBalanceReq", async id => {
+    await getBalanceByCompany(id);
+  });
 
-        // Balance update interval
-        const balanceInterval = setInterval(() => {
-          fetchWaitCalls(waitcalls => {
-            ws.send(JSON.stringify({
-              waitcalls
-            }));
-            const currentHash = generateHash(waitcalls);
-            if (previousCompanyWaitCallsHash !== currentHash) {
-              ws.send(JSON.stringify({
-                waitcalls
-              }));
-              previousCompanyWaitCallsHash = generateHash(currentHash);
-            }
-          });
-        }, 1000);
-
-        // Clear the interval on WebSocket close
-        ws.on("close", () => {
-          clearInterval(balanceInterval);
-        });
-      });
-    }
-    if (data.action === "fetchSuperAllLivecalls") {
-      const fetchBalance = callback => {
-        const query = `
-          SELECT 
-            companies.company_name, 
-            companies.email, 
-            companies.id AS company_id, 
-            countries.country_name, 
-            caller_num, 
-            agent_channel, 
-            agent_name, 
-            agent_number, 
-            call_status, 
-            call_type, 
-            tfn, 
-            destination_type, 
-            destination, 
-            live_calls.created_at, 
-            live_calls.updated_at 
-          FROM 
-            live_calls 
-          LEFT JOIN 
-            companies ON live_calls.company_id = companies.id 
-          LEFT JOIN 
-            countries ON live_calls.country_id = countries.id 
-          WHERE 
-            live_calls.call_status = 3`;
-        connection.query(query, (err, results) => {
-          if (err) {
-            return callback(null);
-          }
-          callback(results ? results : null);
-        });
-      };
-
-      // Initial balance fetch
-      fetchBalance(initialBalance => {
-        previousCompanyLiveCallsHash = generateHash(initialBalance);
-        ws.send(JSON.stringify({
-          initialBalance
-        }));
-
-        // Balance update interval
-        const balanceInterval = setInterval(() => {
-          fetchBalance(livecalls => {
-            ws.send(JSON.stringify({
-              livecalls
-            }));
-            const currentHash = generateHash(livecalls);
-            if (previousCompanyLiveCallsHash !== currentHash) {
-              ws.send(JSON.stringify({
-                livecalls
-              }));
-              previousCompanyLiveCallsHash = generateHash(currentHash);
-            }
-          });
-        }, 1000);
-
-        // Clear the interval on WebSocket close
-        ws.on("close", () => {
-          clearInterval(balanceInterval);
-        });
+  //Live calls
+  socket.on("fetchLiveCallsReq", async data => {
+    try {
+      company_id = data.company_id;
+      const liveCalls = await getLiveCalls(data);
+      socket.emit("getLiveCallsRes", liveCalls);
+      previousCompanyLiveCallsHash = generateHash(liveCalls); // Store hash after first fetch
+    } catch (error) {
+      socket.emit("getLiveCallsRes", {
+        error: "Internal server error"
       });
     }
   });
-});
+  const fetchLiveCallsInterval = setInterval(async () => {
+    if (company_id) {
+      const data = {
+        company_id: company_id
+      };
+      const liveCalls = await getLiveCalls(data);
+      const currentHash = generateHash(liveCalls);
+      if (currentHash !== previousCompanyLiveCallsHash) {
+        socket.emit("getLiveCallsRes", liveCalls);
+        previousCompanyLiveCallsHash = currentHash;
+      }
+    }
+  }, 1000);
+  socket.on("disconnect", () => {
+    clearInterval(fetchLiveCallsInterval);
+  });
 
-// Start server on port 8001
-server.listen(8001, () => {
-  console.log("Server is listening on port 8001");
+  //Waiting calls
+  socket.on("fetchWaitingCallsReq", async data => {
+    try {
+      company_id = data.company_id;
+      const waitingCalls = await getWaitingCalls(data);
+      socket.emit("getWaitingCallsRes", waitingCalls);
+      previousCompanyWaitingCallsHash = generateHash(waitingCalls);
+    } catch (error) {
+      socket.emit("getWaitingCallsRes", {
+        error: "Internal server error"
+      });
+    }
+  });
+  const fetchWaitingCallsInterval = setInterval(async () => {
+    if (company_id) {
+      const data = {
+        company_id: company_id
+      };
+      const waitingCalls = await getWaitingCalls(data);
+      const currentHash = generateHash(waitingCalls);
+      if (currentHash !== previousCompanyWaitingCallsHash) {
+        socket.emit("getWaitingCallsRes", waitingCalls);
+        previousCompanyWaitingCallsHash = currentHash;
+      }
+    }
+  }, 1000);
+  socket.on("disconnect", () => {
+    clearInterval(fetchWaitingCallsInterval);
+  });
+
+  //All Waiting calls
+  socket.on("fetchAllWaitingCallsReq", async data => {
+    try {
+      slug = data.slug;
+      const waitingCalls = await getAllWaitingCalls();
+      socket.emit("getAllWaitingCallsRes", waitingCalls);
+      previousWaitingCallsHash = generateHash(waitingCalls); // Store hash after first fetch
+    } catch (error) {
+      socket.emit("getAllWaitingCallsRes", {
+        error: "Internal server error"
+      });
+    }
+  });
+  const fetchAllWaitingCallsInterval = setInterval(async () => {
+    if (["super-admin", "noc", "support"].includes(slug)) {
+      try {
+        const currentWaitingCalls = await getAllWaitingCalls();
+        const currentHash = generateHash(currentWaitingCalls);
+        if (currentHash !== previousWaitingCallsHash) {
+          socket.emit("getAllWaitingCallsRes", currentWaitingCalls);
+          previousWaitingCallsHash = currentHash;
+        }
+      } catch (error) {
+        socket.emit("getAllAllCallsRes", {
+          error: "Internal server error"
+        });
+      }
+    }
+  }, 1000);
+  socket.on("disconnect", () => {
+    clearInterval(fetchAllWaitingCallsInterval);
+  });
+
+  //All Live calls
+  socket.on("fetchAllLiveCallsReq", async data => {
+    try {
+      slug = data.slug;
+      const allLiveCalls = await getAllLiveCalls();
+      socket.emit("getAllAllCallsRes", allLiveCalls);
+      previousLiveCallsHash = generateHash(allLiveCalls); // Store hash after first fetch
+    } catch (error) {
+      socket.emit("getAllAllCallsRes", {
+        error: "Internal server error"
+      });
+    }
+  });
+  const fetchAllLiveCallsInterval = setInterval(async () => {
+    if (["super-admin", "noc", "support"].includes(slug)) {
+      try {
+        const currentLiveCalls = await getAllLiveCalls();
+        const currentHash = generateHash(currentLiveCalls);
+        if (currentHash !== previousLiveCallsHash) {
+          socket.emit("getAllAllCallsRes", currentLiveCalls);
+          previousLiveCallsHash = currentHash;
+        }
+      } catch (error) {
+        socket.emit("getAllAllCallsRes", {
+          error: "Internal server error"
+        });
+      }
+    }
+  }, 1000);
+  socket.on("disconnect", () => {
+    clearInterval(fetchAllLiveCallsInterval);
+  });
+  socket.on("logout", function () {
+    if (socket.handshake.session.userdata) {
+      delete socket.handshake.session.userdata;
+      socket.handshake.session.save();
+    }
+  });
+});
+app.use((req, res, next) => {
+  next();
 });
 //# sourceMappingURL=index.js.map

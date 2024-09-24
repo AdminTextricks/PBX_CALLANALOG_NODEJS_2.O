@@ -5,8 +5,7 @@ const cors = require("cors");
 const connection = require("./db");
 const app = express();
 const server = http.createServer(app);
-// const wss = new WebSocket.Server({ server });
-const wss = new WebSocket.Server({ port: 8001 });
+const wss = new WebSocket.Server({ server });
 const crypto = require("crypto");
 
 // Enable CORS
@@ -71,6 +70,7 @@ process.on("SIGTERM", () => {
 // WebSocket connection
 // Existing WebSocket connection code
 wss.on("connection", (ws) => {
+  
   let userId = null;
   let currentBalance = null;
   let previousCompanyLiveCallsHash = "";

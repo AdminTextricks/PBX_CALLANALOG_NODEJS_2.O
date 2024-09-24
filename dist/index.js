@@ -5,8 +5,9 @@ const cors = require("cors");
 const connection = require("./db");
 const app = express();
 const server = http.createServer(app);
+// const wss = new WebSocket.Server({ server });
 const wss = new WebSocket.Server({
-  server
+  port: 8001
 });
 const crypto = require("crypto");
 

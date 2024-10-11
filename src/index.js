@@ -6,20 +6,20 @@ const crypto = require("crypto");
 const app = express();
 
 // Development>>>>>>>>>>>>>>>>
-const http = require("http");
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+// const http = require("http");
+// const server = http.createServer(app);
+// const wss = new WebSocket.Server({ server });
 
 // Production>>>>>>>>>>>>>>>>>>
 
-// const https = require("https");
-// const options = {
-//   cert: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com-0004/fullchain.pem"),  // Path to SSL certificate
-//   key: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com-0004/privkey.pem")     // Path to SSL key
-//     //ca: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com/chain.pem")
-//     };
-// const server = https.createServer(options,app);
-// const wss = new WebSocket.Server({ server });
+const https = require("https");
+const options = {
+  cert: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com-0004/fullchain.pem"),  // Path to SSL certificate
+  key: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com-0004/privkey.pem")     // Path to SSL key
+    //ca: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com/chain.pem")
+    };
+const server = https.createServer(options,app);
+const wss = new WebSocket.Server({ server });
 
 // Enable CORS
 app.use(
@@ -78,6 +78,7 @@ process.on("SIGTERM", () => {
 // WebSocket connection
 wss.on("connection", (ws) => {
   let userId = null;
+  let prevData = null;
   let currentBalance = null;
   let previousCompanyLiveCallsHash = "";
   let previousCompanyWaitCallsHash = "";
@@ -369,25 +370,66 @@ wss.on("connection", (ws) => {
       });
     }
 
-    if (data.action === "fetchBalance") {
+    if (data.action === "fetchNewDocs") {
+      const fetchDocCount = (callback) => {
+        const query = `SELECT count(*) as count FROM user_documents WHERE status = 0`;
+        connection.query(query, (err, results) => {
+          if (err) {
+            return callback(err, null);
+          }
+          const currentCount = results[0]?.count || 0;
+          callback(null, currentCount);
+        });
+      };
+
+      // Initial document count fetch
+      fetchDocCount((err, initialCount) => {
+        if (err) {
+          console.error("Error fetching count:", err);
+          return;
+        }
+
+        prevData = initialCount;
+        ws.send(JSON.stringify({ count: prevData }));
+
+        const balanceInterval = setInterval(() => {
+          fetchDocCount((err, newCount) => {
+            if (err) {
+              console.error("Error fetching new count:", err);
+              return;
+            }
+            if (newCount !== prevData && newCount > prevData) {
+              ws.send(JSON.stringify({ count: newCount }));
+              prevData = newCount;
+            }
+          });
+        }, 2000);
+        ws.on("close", () => {
+          clearInterval(balanceInterval);
+        });
+      });
+    }
+
+    if (data.action === "fetchResellerBalance") {
       userId = data.userId;
 
-      // Function to fetch notification
+      // Function to fetch the balance
       const fetchBalance = (callback) => {
         connection.query(
-          "SELECT id, company_name, email, balance FROM companies WHERE id = ?",
+          "SELECT balance FROM `reseller_wallets` WHERE user_id = ?",
           [userId],
           (err, results) => {
             if (err) {
               console.error("Database query error:", err);
-              return callback(null);
+              callback(null);
+            } else {
+              callback(results[0] ? results[0].balance : null);
             }
-            callback(results[0] ? results[0].balance : null);
           }
         );
       };
 
-      // Initial fetch notification
+      // Initial document
       fetchBalance((initialBalance) => {
         currentBalance = initialBalance;
         ws.send(JSON.stringify({ balance: currentBalance }));
@@ -408,6 +450,7 @@ wss.on("connection", (ws) => {
         });
       });
     }
+
   });
 });
 

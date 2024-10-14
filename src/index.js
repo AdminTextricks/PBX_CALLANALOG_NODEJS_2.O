@@ -5,6 +5,9 @@ const connection = require("./db");
 const crypto = require("crypto");
 const app = express();
 const fs = require('fs');
+const bodyParser = require("body-parser");
+
+app.use(bodyParser.json());
 
 // Development>>>>>>>>>>>>>>>>
 // const http = require("http");
@@ -272,7 +275,7 @@ wss.on("connection", (ws) => {
       });
     }
 
-    if (data.action === "fetchAllWaitingcalls") {
+    if (data.action === "fetchAllWaitingcalls1") {
       const fetchWaitCalls = (callback) => {
         const query = `
             SELECT companies.company_name, companies.email, countries.country_name, caller_num,agent_channel,agent_name,agent_number, call_status, call_type, tfn, destination_type, destination, live_calls.created_at, live_calls.updated_at FROM live_calls

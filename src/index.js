@@ -19,11 +19,15 @@ app.use(bodyParser.json());
 
 const https = require("https");
 const options = {
-  cert: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com-0004/fullchain.pem"),  // Path to SSL certificate
-  key: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com-0004/privkey.pem")     // Path to SSL key
-    //ca: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com/chain.pem")
-    };
-const server = https.createServer(options,app);
+  cert: fs.readFileSync(
+    "/etc/letsencrypt/live/socket.callanalog.com-0004/fullchain.pem"
+  ), // Path to SSL certificate
+  key: fs.readFileSync(
+    "/etc/letsencrypt/live/socket.callanalog.com-0004/privkey.pem"
+  ), // Path to SSL key
+  //ca: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com/chain.pem")
+};
+const server = https.createServer(options, app);
 const wss = new WebSocket.Server({ server });
 
 // Enable CORS
@@ -610,7 +614,8 @@ wss.on("connection", (ws) => {
            WHERE is_read = 0 
            AND user_type = ?) AS notification_recipients_count,
           JSON_ARRAYAGG(JSON_OBJECT(
-              'id', limited_n.id,
+              'id', limited_n.notification_id,
+              'notification_recipient_id', limited_n.notification_recipient_id,
               'subject', limited_n.subject,
               'message', limited_n.message,
               'type', limited_n.type,
@@ -618,7 +623,8 @@ wss.on("connection", (ws) => {
           )) AS data
       FROM (
           SELECT 
-              n.id, 
+              n.id AS notification_id, 
+              nr.id AS notification_recipient_id,
               n.subject, 
               n.message, 
               n.type, 
@@ -635,7 +641,7 @@ wss.on("connection", (ws) => {
               n.created_at DESC
           LIMIT 10
       ) AS limited_n;
-  `;
+    `;
 
       const user_query = `
   SELECT 
@@ -644,7 +650,8 @@ wss.on("connection", (ws) => {
        WHERE is_read = 0 
        AND user_id = ?) AS notification_recipients_count,
       JSON_ARRAYAGG(JSON_OBJECT(
-          'id', limited_n.id,
+          'id', limited_n.notification_id,
+          'notification_recipient_id', limited_n.notification_recipient_id,
           'subject', limited_n.subject,
           'message', limited_n.message,
           'type', limited_n.type,
@@ -652,7 +659,8 @@ wss.on("connection", (ws) => {
       )) AS data
   FROM (
       SELECT 
-          n.id, 
+          n.id AS notification_id, 
+          nr.id AS notification_recipient_id,
           n.subject, 
           n.message, 
           n.type,

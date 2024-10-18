@@ -6,7 +6,7 @@ const crypto = require("crypto");
 const app = express();
 const fs = require("fs");
 const bodyParser = require("body-parser");
-const logger = require("./logger");
+const logger = require("./Logger");
 
 app.use(bodyParser.json());
 

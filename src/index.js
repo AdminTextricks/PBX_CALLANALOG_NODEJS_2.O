@@ -603,6 +603,68 @@ wss.on("connection", (ws) => {
       });
     }
 
+    if (data.action === "GET_CALLS_COUNT_FOR_COMPANY") {
+      userId = data.userId;
+
+      const GET_CALLS_COUNT_FOR_COMPANY = (callback) => {
+        const query = `SELECT COUNT(CASE WHEN DATE(call_start_time) = CURDATE() - INTERVAL 1 DAY THEN 1 END) AS prev_count,COUNT(CASE WHEN DATE(call_start_time) = CURDATE() THEN 1 END) AS today_count FROM cdrs WHERE company_id = ?;`;
+        connection.query(query, [userId], (err, results) => {
+          if (err) {
+            return callback(null);
+          }
+          callback(results ? results[0] : null);
+        });
+      };
+      GET_CALLS_COUNT_FOR_COMPANY((initCount) => {
+        todayLiveCountHash = initCount?.today_count;
+        ws.send(JSON.stringify({ initCount }));
+        const COMPANY_CALLS_COUNT_INTERVAL = setInterval(() => {
+          GET_CALLS_COUNT_FOR_COMPANY((initCount) => {
+            const currentHash = initCount?.today_count;
+            if (todayLiveCountHash !== currentHash) {
+              todayLiveCountHash = currentHash;
+              ws.send(JSON.stringify({ initCount }));
+            }
+          });
+        }, 1000);
+
+        ws.on("close", () => {
+          clearInterval(COMPANY_CALLS_COUNT_INTERVAL);
+        });
+      });
+    }
+
+    if (data.action === "GET_ANSWER_CALLS_COUNT_FOR_COMPANY") {
+      userId = data.userId;
+
+      const GET_ANSWER_CALLS_COUNT_FOR_COMPANY = (callback) => {
+        const query = `SELECT COUNT(CASE WHEN DATE(call_start_time) = CURDATE() - INTERVAL 1 DAY THEN 1 END) AS prev_count, COUNT(CASE WHEN DATE(call_start_time) = CURDATE() THEN 1 END) AS today_count FROM cdrs WHERE disposition = 'ANSWER' AND company_id = ?;`;
+        connection.query(query, [userId], (err, results) => {
+          if (err) {
+            return callback(null);
+          }
+          callback(results ? results[0] : null);
+        });
+      };
+      GET_ANSWER_CALLS_COUNT_FOR_COMPANY((initAnsCount) => {
+        todayAnswerCountHash = initAnsCount?.today_count;
+        ws.send(JSON.stringify({ initAnsCount }));
+        const COMPANY_CALLS_ANS_COUNT_INTERVAL = setInterval(() => {
+          GET_ANSWER_CALLS_COUNT_FOR_COMPANY((initAnsCount) => {
+            const currentHash = initAnsCount?.today_count;
+            if (todayAnswerCountHash !== currentHash) {
+              todayAnswerCountHash = currentHash;
+              ws.send(JSON.stringify({ initAnsCount }));
+            }
+          });
+        }, 1000);
+
+        ws.on("close", () => {
+          clearInterval(COMPANY_CALLS_ANS_COUNT_INTERVAL);
+        });
+      });
+    }
+
     if (data.action === "GET_NOTIFICATION") {
       id = data?.user_data?.user_id;
       user_type = data?.user_data?.user_type;

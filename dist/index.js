@@ -19,9 +19,7 @@ app.use(bodyParser.json());
 const https = require("https");
 const options = {
   cert: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com-0004/fullchain.pem"),
-  // Path to SSL certificate
-  key: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com-0004/privkey.pem") // Path to SSL key
-  //ca: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com/chain.pem")
+  key: fs.readFileSync("/etc/letsencrypt/live/socket.callanalog.com-0004/privkey.pem")
 };
 const server = https.createServer(options, app);
 const wss = new WebSocket.Server({
@@ -219,6 +217,7 @@ wss.on("connection", ws => {
             tfn, 
             destination_type, 
             destination, 
+            live_calls.ip,
             live_calls.created_at, 
             live_calls.updated_at 
           FROM 
@@ -368,6 +367,7 @@ wss.on("connection", ws => {
             tfn, 
             destination_type, 
             destination, 
+            live_calls.ip,
             live_calls.created_at, 
             live_calls.updated_at 
           FROM 
